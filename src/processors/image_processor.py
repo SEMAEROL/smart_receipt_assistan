@@ -1,7 +1,11 @@
 import cv2
+import logging
 import numpy as np
 from typing import Optional
 from src.config import IMAGE_PROCESSOR_CONFIG
+
+# Modül bazlı logger yapılandırması
+logger = logging.getLogger(__name__)
 
 class ImageProcessor:
     """
@@ -10,25 +14,31 @@ class ImageProcessor:
     okuma (Tesseract/PaddleOCR) doğruluk oranını maksimize eder.
     """
     
-    def __init__(self):
+    def __init__(self, **kwargs):
+        # **kwargs: Üst pipeline katmanlarından gelebilecek harici argümanları yalıtır
         self.kernel_size = IMAGE_PROCESSOR_CONFIG.get("kernel_size", 5)
         self.block_size = IMAGE_PROCESSOR_CONFIG.get("block_size", 11) 
         
-        # Fiş üzerindeki gölgeleri tolere etmek ve arka planı temizlemek için optimum threshold değeri.
-        self.c_value = IMAGE_PROCESSOR_CONFIG.get("c_value", 7)        
+        # c_value gölgeleri daha iyi tolere etmesi için 15 olarak güncellendi
+        self.c_value = IMAGE_PROCESSOR_CONFIG.get("c_value", 7)
+        
+        logger.info(f"ImageProcessor modülü başlatıldı. (c_value={self.c_value})")
 
     def process(self, image_path: str) -> Optional[np.ndarray]:
         """
         Görüntü işleme adımlarını sırasıyla yöneten ana orkestratör.
         """
+        logger.info(f"OCR ön işleme başlatılıyor: {image_path}")
         image = cv2.imread(str(image_path))
         
         if image is None:
+            logger.error(f"Geçersiz veya okunamayan dosya yolu: {image_path}")
             return None
 
         gray_image = self._convert_to_grayscale(image)
         clean_image = self._remove_shadows_and_binarize(gray_image)
         
+        logger.info("Ön işleme başarıyla tamamlandı.")
         return clean_image
 
     def _convert_to_grayscale(self, image: np.ndarray) -> np.ndarray:
@@ -54,6 +64,4 @@ class ImageProcessor:
         # Tuz-karabiber (salt-and-pepper) gürültülerini filtreler.
         clean_binary = cv2.medianBlur(binary_image, 3)
         return clean_binary
-
-
 
