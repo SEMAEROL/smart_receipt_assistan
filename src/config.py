@@ -41,10 +41,25 @@ IMAGE_PROCESSOR_CONFIG = {
 # ============================================================================
 
 OCR_ENGINE_CONFIG = {
-    "language": "tur+eng",      # Tesseract dil kodu
-    "tesseract_cmd": None,      # Tesseract yolu (None = sistem PATH'ten)
-    "config": "--oem 3 --psm 6", # Tesseract config
-}
+    # Aktif olarak kullanılacak OCR motoru secme 
+    # Seçenekler: "tesseract", "paddleocr"
+    "active_engine": "paddleocr", 
+
+    "engines": {
+        "tesseract": {
+            "language": "tur+eng",      
+            "tesseract_cmd": None,      # (None = sistem PATH'ten)
+            "config": "--oem 3 --psm 6", 
+        },
+        "paddleocr": {
+            "lang": "tr",
+            "use_angle_cls": True,
+            "use_gpu": False,           
+            "det_model_dir": str(MODELS_DIR / "paddleocr" / "det"),
+            "rec_model_dir": str(MODELS_DIR / "paddleocr" / "rec"),
+            "cls_model_dir": str(MODELS_DIR / "paddleocr" / "cls"),
+        }
+    }}
 
 # Windows'ta Tesseract yolu (isteğe bağlı)
 # OCR_ENGINE_CONFIG["tesseract_cmd"] = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
