@@ -1,6 +1,7 @@
 from typing import Any, Dict, List
 from config import OCR_ENGINE_CONFIG
 
+
 def normalize_ocr_output(raw_ocr_output: Any) -> List[Dict[str, Any]]:
     """
     Farklı OCR motorlarından gelen ham çıktıları standart bir formata dönüştürür.
@@ -24,10 +25,13 @@ def _normalize_paddleocr(raw_output: Any) -> List[Dict[str, Any]]:
     """
     standardized_data = []
     
+    if not raw_output:
+        return []
     # PaddleOCR bazen liste içinde liste dönebilir, yapıyı kontrol ediyoruz
     if not raw_output or not isinstance(raw_output, list):
         return standardized_data
-
+    
+    
     # İlk sayfanın verisi
     page_data = raw_output[0] if isinstance(raw_output[0], list) else raw_output
     

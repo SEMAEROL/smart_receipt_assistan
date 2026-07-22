@@ -138,7 +138,7 @@ def test_parser():
     logger.info("TEST 3: Receipt Parser")
     logger.info("=" * 60)
 
-    from src.processors.parser import ReceiptParser
+    from src.processors.parser_to_json import ReceiptParser
 
     parser = ReceiptParser()
 

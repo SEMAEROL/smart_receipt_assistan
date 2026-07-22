@@ -12,9 +12,10 @@ import os
 
 from src.processors.image_processor import ImageProcessor
 from src.processors.ocr_engine import OCREngine
-from src.processors.parser import ReceiptParser
+from src.processors.parser_to_json import ReceiptParser
 from src.reporting.docx_generator import DocxReportGenerator
 from src.models.receipt import Receipt, BatchReportSummary
+from src.processors.ocr_normalizer import normalize_ocr_output
 
 # Logging konfigürasyonu
 logging.basicConfig(
@@ -70,22 +71,6 @@ class ReceiptPipeline:
         return file_extension in supported_formats
 
     def process_single_receipt(self, image_path: str) -> Optional[Receipt]:
-        """
-        Bir fişi (görüntüyü) başından sonuna kadar işler.
-        
-        İş akışı:
-        1. Görüntü ön işlemesi
-        2. OCR ile metin çıkarma
-        3. Metni ayrıştırma
-        4. Receipt nesnesi oluşturma
-        
-        Args:
-            image_path (str): İşlenecek görüntü dosyasının yolu
-            
-        Returns:
-            Receipt: Ayrıştırılmış fiş nesnesi
-            None: Hata oluştu durumunda
-        """
         logger.info(f"Fiş işleniyor: {image_path}")
 
         try:
@@ -95,18 +80,28 @@ class ReceiptPipeline:
                 logger.error(f"Görüntü ön işlemesi başarısız: {image_path}")
                 return None
 
-            # Adım 2: OCR ile metin çıkarma
-            raw_text = self.ocr_engine.extract_text(processed_image)
-            if not raw_text:
-                logger.warning(f"OCR metni boş: {image_path}")
-                # Boş metin bile olsa devam et, en azından bir Receipt nesnesi döndür
+            # Adım 2: OCR ile metin çıkarma (Farklı modeller farklı veri tipleri dönebilir)
+            raw_ocr_data = self.ocr_engine.extract_text(processed_image)
+            
+            # Eğer OCR hiçbir şey bulamadıysa işlemi kes
+            if not raw_ocr_data:
+                logger.warning(f"OCR metni boş, fiş atlanıyor: {image_path}")
+                return None 
 
-            # Adım 3: Metni ayrıştırma
+            # Adım 3: OCR Çıktısını Normalize Et (Her modelden gelen veriyi tek tipe çevir)
+            standard_data = normalize_ocr_output(raw_ocr_data)
+            
+            # Eğer normalizasyon sonrası liste boşsa yine devam etmenin anlamı yok
+            if not standard_data:
+                logger.warning(f"Normalizasyon sonrası metin kalmadı: {image_path}")
+                return None
+
+            # Adım 4: Metni ayrıştırma
             filename = Path(image_path).name
-            receipt = self.parser.parse(raw_text, filename=filename)
+            final_json = self.parser.parse(standard_data, filename=filename)
 
-            logger.info(f"Fiş başarıyla işlendi: {filename} - {receipt.merchant_name}")
-            return receipt
+            logger.info(f"Fiş başarıyla işlendi: {filename} - {final_json.merchant_name}")
+            return final_json
 
         except Exception as e:
             logger.error(f"Fiş işlemede kritik hata ({image_path}): {str(e)}")
