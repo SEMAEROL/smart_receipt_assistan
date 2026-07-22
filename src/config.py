@@ -74,17 +74,19 @@ PARSER_CONFIG = {
     "min_price": 0.01,           # Minimum fiyat
 }
 
-# Kategori anahtar kelimeleri
-CATEGORY_KEYWORDS: Dict[str, List[str]] = {
-    "Market": ["market", "bim", "migros", "carrefour", "tesco", "gıda", "manav", "bakkal", "super"],
-    "Akaryakıt": ["petrol", "benzin", "akaryakıt", "shell", "bp", "opet", "tüpraş", "sunş", "lpg"],
-    "Teknoloji": ["elektronik", "bilgisayar", "telefon", "tablet", "laptop", "yazıcı", "monitor", "tech"],
-    "Sağlık": ["eczane", "eczacı", "ilaç", "tıp", "doktor", "hastane", "klinik", "diş", "pharma"],
-    "Yemek": ["restoran", "kafe", "kahvehane", "pizzeria", "burger", "kebap", "lokanta", "yemek", "food"],
-    "Ulaşım": ["taksi", "otobüs", "tren", "uçak", "otoparkı", "benzin", "dolmuş", "uber", "transport"],
-    "Giyim": ["giyim", "ayakkabı", "moda", "butik", "tekstil", "alışveriş", "confection"],
-    "Eğitim": ["okul", "üniversite", "eğitim", "kütüphane", "kitap", "kursu", "education"],
-}
+RECEIPT_KEYWORDS = {
+    "en": {
+        "date": ["Bill Date", "DD", "Date"],
+        "total": ["Net Total", "Total Amount", "Gross Amt", "Net Act", "Total", "Total Payable", "Payment", "Total Amt Rounded", "Amt Due", "Sub Total"],
+        "tax": ["Tax", "Svr Tax", "GST"],
+        "unit_price": ["Price"]
+    },
+    "tr": {
+        "date": ["Tarih", "Fiş Tarihi", "Tarihi"],
+        "total": ["Toplam", "Genel Toplam", "Net Tutar", "Ara Toplam", "Ödenen", "Tutar", "Kredi Kartı", "Nakit"],
+        "tax": ["KDV", "Top. KDV", "Toplam KDV", "Vergi"],
+        "unit_price": ["Birim Fiyat", "Fiyat", "B.Fiyat"]
+    }}
 
 # ============================================================================
 # WORD RAPOR AYARLARI
@@ -144,9 +146,7 @@ DATABASE_CONFIG = {
     "database": "receipts",                # Veritabanı adı
 }
 
-# ============================================================================
-# İÇERİK AYARLARI (i18n)
-# ============================================================================
+
 
 CONTENT_STRINGS = {
     "tr": {
@@ -187,7 +187,7 @@ CONTENT_STRINGS = {
     }
 }
 
-# Varsayılan dil
+# eger gelirse turkce karakterleri de okuyabilmek icin tr kalsin. 
 DEFAULT_LANGUAGE = "tr"
 
 # ============================================================================
