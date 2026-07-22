@@ -1,0 +1,19 @@
+# Akıllı Fatura/Fiş Okuma ve Mini Muhasebe Asistanı - Bağımlılıklar
+
+# Görüntü İşleme
+opencv-python==4.8.1.78
+numpy==1.24.3
+
+# OCR - Tesseract
+pytesseract==0.3.10
+
+# Levenshtein Mesafesi (Typo Düzeltme)
+python-Levenshtein==0.23.0
+
+# Word Rapor Üretimi
+python-docx==0.8.11
+
+# Linting ve Tip Kontrolü (Opsiyonel)
+pylint==3.0.0
+black==23.12.0
+mypy==1.7.0
