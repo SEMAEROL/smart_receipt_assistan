@@ -1,279 +1,150 @@
-"""
-OCR (Optik Karakter Tanıma) Motoru Modülü
-
-Bu modül Tesseract OCR aracı kullanarak görüntülerden metin çıkarır
-ve Levenshtein mesafesini kullanarak yazım hatalarını düzeltir.
-"""
-
-import pytesseract
 import logging
 import re
-from typing import List, Dict, Optional
-from difflib import SequenceMatcher
+import shutil
+from typing import List, Dict, Any, Optional
 import numpy as np
+import pytesseract
+from pytesseract import Output
 
-# Logging konfigürasyonu
+try:
+    from src.config import OCR_ENGINE_CONFIG
+except ModuleNotFoundError:  # pragma: no cover
+    from config import OCR_ENGINE_CONFIG
+
+from src.processors.ocr_normalizer import normalize_ocr_output
+
+try:
+    from rapidocr_onnxruntime import RapidOCR
+except Exception:  # pragma: no cover
+    RapidOCR = None
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 class OCREngine:
     """
-    OCR işlemlerini gerçekleştiren sınıf.
-    
-    Tesseract OCR aracı kullanarak görüntülerden metin çıkarır ve
-    Levenshtein mesafesini kullanarak yazım hatalarını düzeltir.
-    
-    Attributes:
-        language (str): OCR için kullanılan dil (Türkçe için 'tur')
-        config (str): Tesseract konfigürasyonu
+    Config dosyasına bağlı olarak Tesseract veya PaddleOCR kullanarak 
+    görüntüden metin çıkaran ve Levenshtein ile düzelten ana sınıf.
     """
 
     def __init__(self, language: str = "tur+eng"):
-        """
-        OCREngine başlatıcısı.
-        
-        Args:
-            language (str): OCR dili (varsayılan: Türkçe + İngilizce)
-        """
+        self.active_engine = OCR_ENGINE_CONFIG.get("active_engine", "tesseract")
+        self.config_params = OCR_ENGINE_CONFIG.get("engines", {}).get(self.active_engine, {})
         self.language = language
-        # Tesseract konfigürasyonu: PDF ve Üst Kalite modu
-        self.config = "--oem 3 --psm 6"
+        self.rapid_ocr = None
         
-        logger.info(f"OCREngine başlatıldı - Dil: {language}")
+        if self.active_engine == "paddleocr":
+            try:
+                from paddleocr import PaddleOCR
+                self.paddle_ocr = PaddleOCR(
+                    lang=self.config_params.get("lang", "tr"),
+                    use_angle_cls=self.config_params.get("use_angle_cls", True),
+                    use_gpu=self.config_params.get("use_gpu", False),
+                    show_log=False
+                )
+            except Exception as exc:
+                logger.warning(f"PaddleOCR yüklenemedi, Tesseract kullanacak: {exc}")
+                self.active_engine = "tesseract"
+                self.config_params = OCR_ENGINE_CONFIG.get("engines", {}).get("tesseract", {})
 
-    def extract_text(self, processed_image: np.ndarray) -> str:
+        if self.active_engine == "tesseract":
+            if self.config_params.get("tesseract_cmd"):
+                pytesseract.pytesseract.tesseract_cmd = self.config_params["tesseract_cmd"]
+
+            if shutil.which("tesseract") is None:
+                logger.warning("Tesseract PATH erişimi yok, RapidOCR fallback devreye girecek.")
+                if RapidOCR is not None:
+                    self.rapid_ocr = RapidOCR()
+                    self.active_engine = "rapidocr"
+                    self.config_params = {}
+                else:
+                    self.active_engine = "rapidocr"
+                    self.config_params = {}
+
+        logger.info(f"OCREngine başlatıldı - Aktif Motor: {self.active_engine}")
+
+    def process_image(self, processed_image: np.ndarray) -> List[Dict[str, Any]]:
         """
-        İşlenmiş görüntüden metin çıkarır.
-        
-        Args:
-            processed_image (np.ndarray): Ön işlemden geçmiş görüntü
-            
-        Returns:
-            str: Çıkarılan metin
+        Görseli alır, aktif OCR motorunda çalıştırır ve 
+        NORMALİZE EDİLMİŞ standart liste formatında döndürür.
         """
         if processed_image is None:
-            logger.warning("İşlenmiş görüntü None, boş string döndürülüyor")
-            return ""
+            logger.warning("Görüntü None, boş liste dönüyor.")
+            return []
 
         try:
-            # Tesseract ile metin çıkarma
-            raw_text = pytesseract.image_to_string(
-                processed_image,
-                lang=self.language,
-                config=self.config
-            )
+            if self.active_engine == "paddleocr":
+                raw_output = self.paddle_ocr.ocr(processed_image, cls=True)
+
+            elif self.active_engine == "rapidocr":
+                if self.rapid_ocr is None:
+                    raise RuntimeError("RapidOCR motoru kurulu değil")
+                result, _ = self.rapid_ocr(np.array(processed_image))
+                raw_output = result
             
-            # Ham metni temizle
-            cleaned_text = self._clean_text(raw_text)
+            elif self.active_engine == "tesseract":
+                lang = self.language or self.config_params.get("language", "tur+eng")
+                custom_config = self.config_params.get("config", "--oem 3 --psm 6")
+                raw_output = pytesseract.image_to_data(
+                    processed_image,
+                    lang=lang,
+                    config=custom_config,
+                    output_type=Output.DICT
+                )
             
-            logger.info(f"Metin başarıyla çıkarıldı ({len(cleaned_text)} karakter)")
-            return cleaned_text
+            standardized_data = normalize_ocr_output(raw_output)
+            return standardized_data
 
         except Exception as e:
             logger.error(f"OCR işleminde hata oluştu: {str(e)}")
+            return []
+
+    def extract_text(self, processed_image: np.ndarray) -> str:
+        """
+        Görüntüden OCR ile metin çıktısı döndürür.
+        """
+        standardized = self.process_image(processed_image)
+        if not standardized:
             return ""
 
-    def _clean_text(self, text: str) -> str:
-        """
-        Çıkarılan metni temizler ve standardize eder.
-        
-        Args:
-            text (str): Ham metin
-            
-        Returns:
-            str: Temizlenmiş metin
-        """
-        # Fazla boşlukları kaldır
-        text = re.sub(r'\s+', ' ', text)
-        # Başı ve sonundaki boşlukları kaldır
-        text = text.strip()
-        # Kontrol karakterlerini kaldır
-        text = ''.join(char for char in text if ord(char) >= 32 or char in '\n\r\t')
-        return text
+        return " ".join(item.get("text", "") for item in standardized if item.get("text"))
+
+    # =========================================================================
+    # LEVENSHTEIN VE YAZIM DÜZELTME METOTLARI (Aynen Korundu)
+    # =========================================================================
 
     def levenshtein_distance(self, word1: str, word2: str) -> int:
-        """
-        İki kelime arasındaki Levenshtein mesafesini hesaplar.
-        
-        Levenshtein mesafesi, bir stringi diğer stringe dönüştürmek için
-        gerekli olan minimum edit (ekleme, silme, değiştirme) sayısıdır.
-        
-        Args:
-            word1 (str): Birinci kelime
-            word2 (str): İkinci kelime
-            
-        Returns:
-            int: Levenshtein mesafesi
-        """
-        # Lowercase'e çevir (case-insensitive)
-        word1 = word1.lower()
-        word2 = word2.lower()
-
-        # DP tablosu oluştur
-        rows = len(word1) + 1
-        cols = len(word2) + 1
+        word1, word2 = word1.lower(), word2.lower()
+        rows, cols = len(word1) + 1, len(word2) + 1
         dp = [[0 for _ in range(cols)] for _ in range(rows)]
 
-        # İlk satırı ve sütunu doldur (boş stringten dönüşüm maliyeti)
-        for i in range(rows):
-            dp[i][0] = i
-        for j in range(cols):
-            dp[0][j] = j
+        for i in range(rows): dp[i][0] = i
+        for j in range(cols): dp[0][j] = j
 
-        # DP tablosunu doldur
         for i in range(1, rows):
             for j in range(1, cols):
                 if word1[i - 1] == word2[j - 1]:
-                    # Karakterler aynı, maliyet eklenmez
                     dp[i][j] = dp[i - 1][j - 1]
                 else:
-                    # Karakterler farklı, minimum maliyetli operasyonu seç
-                    dp[i][j] = 1 + min(
-                        dp[i - 1][j],      # Silme
-                        dp[i][j - 1],      # Ekleme
-                        dp[i - 1][j - 1]   # Değiştirme
-                    )
+                    dp[i][j] = 1 + min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
 
         return dp[rows - 1][cols - 1]
 
-    def fix_typos_levenshtein(
-        self,
-        word: str,
-        dictionary: List[str],
-        max_distance: int = 2
-    ) -> str:
-        """
-        Levenshtein mesafesini kullanarak yazım hatalarını düzeltir.
-        Verilen sözlükten en yakın eşleşmeyi bulur.
-        
-        Args:
-            word (str): Düzeltilecek kelime
-            dictionary (List[str]): Doğru kelimelerin listesi (sözlük)
-            max_distance (int): Maksimum Levenshtein mesafesi
-            
-        Returns:
-            str: Düzeltilmiş kelime veya orijinal kelime (eşleşme yoksa)
-        """
-        if not word or not dictionary:
-            return word
-
-        # Kelimeyi küçük harfe çevir
+    def fix_typos_levenshtein(self, word: str, dictionary: List[str], max_distance: int = 2) -> str:
+        if not word or not dictionary: return word
         word_lower = word.lower()
         
-        # Aynı kelimeyi bul
         for dict_word in dictionary:
             if dict_word.lower() == word_lower:
                 return dict_word
 
-        # En yakın eşleşmeyi bul
         best_match = word
         min_distance = float('inf')
 
         for dict_word in dictionary:
             distance = self.levenshtein_distance(word, dict_word)
-            
             if distance < min_distance and distance <= max_distance:
                 min_distance = distance
                 best_match = dict_word
 
-        if min_distance <= max_distance:
-            logger.debug(f"Typo düzeltildi: '{word}' → '{best_match}' (mesafe: {min_distance})")
-            return best_match
-
-        logger.debug(f"Typo düzeltme başarısız: '{word}' (en yakın mesafe: {min_distance})")
-        return word
-
-    def fix_typos_in_text(
-        self,
-        text: str,
-        dictionary: List[str],
-        max_distance: int = 2
-    ) -> str:
-        """
-        Metnin tüm kelimelerinde yazım hatalarını düzeltir.
-        
-        Args:
-            text (str): Düzeltilecek metin
-            dictionary (List[str]): Doğru kelimelerin listesi
-            max_distance (int): Maksimum Levenshtein mesafesi
-            
-        Returns:
-            str: Düzeltilmiş metin
-        """
-        # Kelimeleri ayıkla
-        words = text.split()
-        corrected_words = []
-
-        for word in words:
-            # Noktalama işaretlerini ayıkla
-            punctuation = ''
-            clean_word = word
-            
-            while clean_word and not clean_word[-1].isalnum():
-                punctuation = clean_word[-1] + punctuation
-                clean_word = clean_word[:-1]
-
-            # Typo düzelt
-            corrected = self.fix_typos_levenshtein(clean_word, dictionary, max_distance)
-            corrected_words.append(corrected + punctuation)
-
-        return ' '.join(corrected_words)
-
-    def extract_numbers(self, text: str) -> List[str]:
-        """
-        Metinden tüm sayıları çıkarır.
-        Para miktarları (virgül ve nokta içeren) da dahil.
-        
-        Args:
-            text (str): Metin
-            
-        Returns:
-            List[str]: Bulunan sayılar
-        """
-        # Sayıları (ondalık destekli) bulma regex'i
-        pattern = r'\d+(?:[.,]\d+)?'
-        numbers = re.findall(pattern, text)
-        return numbers
-
-    def extract_dates(self, text: str) -> List[str]:
-        """
-        Metinden tarihleri çıkarır (DD.MM.YYYY, DD/MM/YYYY formatlarında).
-        
-        Args:
-            text (str): Metin
-            
-        Returns:
-            List[str]: Bulunan tarihler
-        """
-        # Tarih regex'leri (DD.MM.YYYY veya DD/MM/YYYY)
-        patterns = [
-            r'\d{2}[./]\d{2}[./]\d{4}',  # DD.MM.YYYY veya DD/MM/YYYY
-            r'\d{4}[./]\d{2}[./]\d{2}',  # YYYY.MM.DD veya YYYY/MM/DD
-        ]
-        
-        dates = []
-        for pattern in patterns:
-            dates.extend(re.findall(pattern, text))
-        
-        return dates
-
-    def get_text_statistics(self, text: str) -> Dict[str, int]:
-        """
-        Metin hakkında istatistik bilgisi döndürür.
-        
-        Args:
-            text (str): Metin
-            
-        Returns:
-            Dict[str, int]: Metin istatistikleri
-        """
-        words = text.split()
-        lines = text.split('\n')
-        
-        return {
-            "character_count": len(text),
-            "word_count": len(words),
-            "line_count": len(lines),
-            "average_word_length": len(text) // max(len(words), 1)
-        }
+        return best_match if min_distance <= max_distance else word

@@ -15,7 +15,6 @@ from src.processors.ocr_engine import OCREngine
 from src.processors.parser_to_json import ReceiptParser
 from src.reporting.docx_generator import DocxReportGenerator
 from src.models.receipt import Receipt, BatchReportSummary
-from src.processors.ocr_normalizer import normalize_ocr_output
 
 # Logging konfigürasyonu
 logging.basicConfig(
@@ -80,20 +79,15 @@ class ReceiptPipeline:
                 logger.error(f"Görüntü ön işlemesi başarısız: {image_path}")
                 return None
 
-            # Adım 2: OCR ile metin çıkarma (Farklı modeller farklı veri tipleri dönebilir)
-            raw_ocr_data = self.ocr_engine.extract_text(processed_image)
-            
-            # Eğer OCR hiçbir şey bulamadıysa işlemi kes
-            if not raw_ocr_data:
-                logger.warning(f"OCR metni boş, fiş atlanıyor: {image_path}")
-                return None 
+            # Adım 2: OCR ile metin çıkarma.
+            # OCREngine.process_image() zaten farklı motorlardan gelen veriyi
+            # tek tip standart liste formuna normalize eder. Bu yüzden pipeline
+            # burada yeniden string'e dönüştürüp normalize etmeye çalışmamalıdır.
+            standard_data = self.ocr_engine.process_image(processed_image)
 
-            # Adım 3: OCR Çıktısını Normalize Et (Her modelden gelen veriyi tek tipe çevir)
-            standard_data = normalize_ocr_output(raw_ocr_data)
-            
-            # Eğer normalizasyon sonrası liste boşsa yine devam etmenin anlamı yok
+            # Eğer OCR hiçbir şey bulamadıysa işlemi kes
             if not standard_data:
-                logger.warning(f"Normalizasyon sonrası metin kalmadı: {image_path}")
+                logger.warning(f"OCR metni boş, fiş atlanıyor: {image_path}")
                 return None
 
             # Adım 4: Metni ayrıştırma

@@ -1,6 +1,12 @@
 import re
 from typing import List, Dict, Any
-from config import RECEIPT_KEYWORDS 
+
+try:
+    from src.config import RECEIPT_KEYWORDS
+except ModuleNotFoundError:  # pragma: no cover
+    from config import RECEIPT_KEYWORDS
+
+from src.models.receipt import Receipt, ReceiptItem
 
 def group_items_by_line(ocr_data: List[Dict], y_tolerance: int = 15) -> List[List[Dict]]:
     """
@@ -121,13 +127,64 @@ def parse_to_json(ocr_data: List[Dict]) -> Dict[str, Any]:
             dates = extract_dates(full_line_text)
             candidates["date"].extend(dates)
             
-    # Eğer tarih hiçbir keyword ile aynı satırda değilse (fişin başında tek başınaysa)
-    # Tüm fişi string olarak birleştirip tek başına duran bir tarih var mı diye tarayabiliriz.
     if not candidates["date"]:
         all_text = " ".join([item["text"] for item in ocr_data])
         dates = extract_dates(all_text)
         if dates:
             candidates["date"].extend(dates)
 
-    # 4. Aday listelerinden nihai sonuçları seçecek olan fonksiyonu çağır
     return select_final_values(candidates)
+
+
+class ReceiptParser:
+    """
+    OCR çıktısını Receipt modeline dönüştürür.
+    """
+
+    def __init__(self):
+        self.category_keywords = {
+            "Market": ["market", "bim", "migros", "carrefour", "tesco", "gıda", "manav", "bakkal"],
+            "Akaryakıt": ["petrol", "benzin", "akaryakıt", "shell", "bp", "opet", "tüpraş", "sunş"],
+            "Teknoloji": ["elektronik", "bilgisayar", "telefon", "tablet", "laptop", "yazıcı", "monitor"],
+            "Diğer": []
+        }
+
+    def _detect_category(self, merchant_name: str, raw_text: str) -> str:
+        combined_text = f"{merchant_name} {raw_text}".lower()
+        for category, keywords in self.category_keywords.items():
+            if category == "Diğer":
+                continue
+            for keyword in keywords:
+                if keyword in combined_text:
+                    return category
+        return "Diğer"
+
+    def _extract_merchant_name(self, raw_text: str) -> str:
+        lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+        if not lines:
+            return "Bilinmiyor"
+        return lines[0]
+
+    def parse(self, ocr_data: List[Dict], filename: str = "unknown") -> Receipt:
+        """
+        Normalized OCR çıktısını Receipt nesnesine çevirir.
+        """
+        raw_text = " ".join(item.get("text", "") for item in ocr_data if item.get("text"))
+        parsed = parse_to_json(ocr_data)
+
+        merchant_name = self._extract_merchant_name(raw_text)
+        category = self._detect_category(merchant_name, raw_text)
+        total_amount = float(parsed.get("total") or 0.0)
+        tax_amount = float(parsed.get("tax") or 0.0)
+        date = parsed.get("date") or "Bilinmiyor"
+
+        return Receipt(
+            filename=filename,
+            merchant_name=merchant_name,
+            date=date,
+            total_amount=total_amount,
+            tax_amount=tax_amount,
+            category=category,
+            items=[],
+            raw_text=raw_text,
+        )

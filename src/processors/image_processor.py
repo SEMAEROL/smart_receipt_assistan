@@ -1,7 +1,9 @@
 import cv2
 import logging
 import numpy as np
+from pathlib import Path
 from typing import Optional
+from PIL import Image
 from src.config import IMAGE_PROCESSOR_CONFIG
 
 # Modül bazlı logger yapılandırması
@@ -28,9 +30,20 @@ class ImageProcessor:
         """
         Görüntü işleme adımlarını sırasıyla yöneten ana orkestratör.
         """
+        image_path = str(Path(image_path))
         logger.info(f"OCR ön işleme başlatılıyor: {image_path}")
-        image = cv2.imread(str(image_path))
-        
+        image = cv2.imread(image_path)
+
+        if image is None:
+            logger.warning(f"OpenCV ile görüntü okunamadı, PIL fallback uygulanıyor: {image_path}")
+            try:
+                with Image.open(image_path) as pil_image:
+                    rgb_image = pil_image.convert("RGB")
+                    image = cv2.cvtColor(np.array(rgb_image), cv2.COLOR_RGB2BGR)
+            except Exception as exc:
+                logger.error(f"Geçersiz veya okunamayan dosya yolu: {image_path} - {exc}")
+                return None
+
         if image is None:
             logger.error(f"Geçersiz veya okunamayan dosya yolu: {image_path}")
             return None

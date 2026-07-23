@@ -1,5 +1,9 @@
 from typing import Any, Dict, List
-from config import OCR_ENGINE_CONFIG
+
+try:
+    from src.config import OCR_ENGINE_CONFIG
+except ModuleNotFoundError:  # pragma: no cover
+    from config import OCR_ENGINE_CONFIG
 
 
 def normalize_ocr_output(raw_ocr_output: Any) -> List[Dict[str, Any]]:
@@ -7,16 +11,22 @@ def normalize_ocr_output(raw_ocr_output: Any) -> List[Dict[str, Any]]:
     Farklı OCR motorlarından gelen ham çıktıları standart bir formata dönüştürür.
     JSON parser'ın her zaman aynı veri yapısıyla çalışmasını sağlar.
     """
-    active_engine = OCR_ENGINE_CONFIG.get("active_engine")
-    
-    if active_engine == "paddleocr":
-        return _normalize_paddleocr(raw_ocr_output)
-    
-    elif active_engine == "tesseract":
+    if not raw_ocr_output:
+        return []
+
+    if isinstance(raw_ocr_output, dict) and "text" in raw_ocr_output:
         return _normalize_tesseract(raw_ocr_output)
-    
-    else:
-        raise ValueError(f"Normalizasyon desteklenmiyor: {active_engine}")
+
+    if isinstance(raw_ocr_output, list):
+        if raw_ocr_output and isinstance(raw_ocr_output[0], dict):
+            return _normalize_rapidocr(raw_ocr_output)
+
+        if raw_ocr_output and isinstance(raw_ocr_output[0], (list, tuple)):
+            if len(raw_ocr_output[0]) == 3 and isinstance(raw_ocr_output[0][0], (list, tuple)):
+                return _normalize_rapidocr_list(raw_ocr_output)
+            return _normalize_paddleocr(raw_ocr_output)
+
+    raise ValueError(f"Normalizasyon desteklenmiyor: {type(raw_ocr_output).__name__}")
 
 def _normalize_paddleocr(raw_output: Any) -> List[Dict[str, Any]]:
     """
@@ -27,12 +37,9 @@ def _normalize_paddleocr(raw_output: Any) -> List[Dict[str, Any]]:
     
     if not raw_output:
         return []
-    # PaddleOCR bazen liste içinde liste dönebilir, yapıyı kontrol ediyoruz
-    if not raw_output or not isinstance(raw_output, list):
+    if not isinstance(raw_output, list):
         return standardized_data
     
-    
-    # İlk sayfanın verisi
     page_data = raw_output[0] if isinstance(raw_output[0], list) else raw_output
     
     for line in page_data:
@@ -41,7 +48,6 @@ def _normalize_paddleocr(raw_output: Any) -> List[Dict[str, Any]]:
             
         box, (text, confidence) = line
         
-        # Bounding box koordinatlarını ayıkla (sol üst ve sağ alt köşeler)
         x_coords = [point[0] for point in box]
         y_coords = [point[1] for point in box]
         
@@ -56,6 +62,63 @@ def _normalize_paddleocr(raw_output: Any) -> List[Dict[str, Any]]:
             }
         })
         
+    return standardized_data
+
+
+def _normalize_rapidocr(raw_output: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    RapidOCR benzeri fallback çıktı formatı:
+    [ {"text": "...", "conf": 95.0, "left": 10, "top": 20, "width": 100, "height": 30}, ... ]
+    """
+    standardized_data = []
+    for item in raw_output:
+        text = str(item.get("text", "")).strip()
+        conf = float(item.get("conf", 0.0))
+        if not text:
+            continue
+
+        standardized_data.append({
+            "text": text,
+            "confidence": conf / 100.0,
+            "bbox": {
+                "x_min": int(item.get("left", 0)),
+                "y_min": int(item.get("top", 0)),
+                "x_max": int(item.get("left", 0)) + int(item.get("width", 0)),
+                "y_max": int(item.get("top", 0)) + int(item.get("height", 0)),
+            }
+        })
+
+    return standardized_data
+
+
+def _normalize_rapidocr_list(raw_output: List[Any]) -> List[Dict[str, Any]]:
+    """
+    RapidOCR gerçek çıktı formatı:
+    [ [ [[x1, y1], [x2, y2], [x3, y3], [x4, y4]], 'metin', 0.883 ], ... ]
+    """
+    standardized_data = []
+    for item in raw_output:
+        if len(item) < 3:
+            continue
+
+        box, text, conf = item[0], item[1], item[2]
+        text = str(text).strip()
+        if not text:
+            continue
+
+        x_coords = [point[0] for point in box]
+        y_coords = [point[1] for point in box]
+        standardized_data.append({
+            "text": text,
+            "confidence": float(conf),
+            "bbox": {
+                "x_min": int(min(x_coords)),
+                "y_min": int(min(y_coords)),
+                "x_max": int(max(x_coords)),
+                "y_max": int(max(y_coords)),
+            }
+        })
+
     return standardized_data
 
 def _normalize_tesseract(raw_output: Dict[str, list]) -> List[Dict[str, Any]]:
