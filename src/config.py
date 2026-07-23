@@ -43,12 +43,12 @@ IMAGE_PROCESSOR_CONFIG = {
 OCR_ENGINE_CONFIG = {
     # Aktif olarak kullanılacak OCR motoru secme 
     # Seçenekler: "tesseract", "paddleocr"
-    "active_engine": "paddleocr", 
+    "active_engine": "tesseract", 
 
     "engines": {
         "tesseract": {
             "language": "tur+eng",      
-            "tesseract_cmd": None,      # (None = sistem PATH'ten)
+            "tesseract_cmd": "C:/Program Files/Tesseract-OCR/tesseract.exe",      # (None = sistem PATH'ten)
             "config": "--oem 3 --psm 6", 
         },
         "paddleocr": {
